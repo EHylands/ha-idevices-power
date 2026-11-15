@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from aiohomekit.model.characteristics import (
+    CharacteristicPermissions,
+    CharacteristicsTypes,
+)
+
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -67,6 +72,24 @@ def metered_characteristics(conn: HKDevice) -> list[tuple[int, str, int]]:
             if service.has(char_type):
                 found.append((accessory.aid, char_type, service[char_type].iid))
     return found
+
+
+def switch_characteristics(conn: HKDevice) -> set[tuple[int, int]]:
+    """Return the pushed on/off and in-use characteristics of metered accessories.
+
+    Unlike the power readings, these notify homekit_controller when they
+    change, so they signal when power is worth reading again.
+    """
+    metered_aids = {aid for aid, _, _ in metered_characteristics(conn)}
+    return {
+        (accessory.aid, char.iid)
+        for accessory in conn.entity_map.accessories
+        if accessory.aid in metered_aids
+        for service in accessory.services
+        for char in service.characteristics
+        if char.type in (CharacteristicsTypes.ON, CharacteristicsTypes.OUTLET_IN_USE)
+        and CharacteristicPermissions.events in char.perms
+    }
 
 
 def device_identifier(hkid: str, aid: int) -> tuple[str, str]:

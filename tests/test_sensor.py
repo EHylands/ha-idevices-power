@@ -13,7 +13,11 @@ from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-from custom_components.idevices_power.const import CONF_HKID, DOMAIN
+from custom_components.idevices_power.const import (
+    CONF_HKID,
+    DOMAIN,
+    SWITCH_SETTLE_DELAY,
+)
 from custom_components.idevices_power.hkc import device_identifier
 
 from pytest_homeassistant_custom_component.common import (
@@ -25,6 +29,7 @@ from .conftest import (
     ACCESSORIES,
     ENERGY_IID,
     HKID,
+    ON_IID,
     POWER_IID,
     TITLE,
     FakeConnection,
@@ -252,3 +257,81 @@ async def test_migrate_single_entry(
     assert hass.config_entries.async_get_entry(old_entry.entry_id) is None
     flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert [flow["context"]["unique_id"] for flow in flows] == [HKID.lower()]
+
+
+async def _settle(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    freezer.tick(timedelta(seconds=SWITCH_SETTLE_DELAY))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_switch_change_reads_power(
+    hass: HomeAssistant,
+    connection: FakeConnection,
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Power is read once it has settled after the switch pushes a change."""
+    assert await _setup(hass, config_entry)
+    assert connection.get_characteristics.await_count == 1
+
+    connection.get_characteristics.return_value = {
+        POWER_IID: {"value": 0},
+        ENERGY_IID: {"value": 12345000000.0},
+    }
+    connection.push(ON_IID)
+    connection.push(ON_IID)  # a quick off and on is read once
+    await hass.async_block_till_done()
+    assert connection.get_characteristics.await_count == 1
+
+    await _settle(hass, freezer)
+    assert connection.get_characteristics.await_count == 2
+    assert float(hass.states.get(POWER).state) == 0.0
+
+
+async def test_switch_watch_follows_reload(
+    hass: HomeAssistant,
+    connection: FakeConnection,
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """After homekit_controller reloads, its new connection is followed."""
+    assert await _setup(hass, config_entry)
+
+    new_connection = FakeConnection(connection.config_entry, HKID, ACCESSORIES)
+    hass.data["homekit_controller-devices"][HKID] = new_connection
+    await _poll(hass, freezer)
+    assert connection.subscriptions == {}
+    assert set(new_connection.subscriptions) == {ON_IID}
+
+    new_connection.push(ON_IID)
+    await _settle(hass, freezer)
+    assert new_connection.get_characteristics.await_count == 2
+
+
+async def test_unload_stops_watching(
+    hass: HomeAssistant,
+    connection: FakeConnection,
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Unloading drops the subscription and any pending read."""
+    assert await _setup(hass, config_entry)
+    assert set(connection.subscriptions) == {ON_IID}
+
+    connection.push(ON_IID)
+    assert await hass.config_entries.async_unload(config_entry.entry_id)
+    await _settle(hass, freezer)
+
+    assert connection.subscriptions == {}
+    assert connection.get_characteristics.await_count == 1
+
+
+async def test_failed_setup_stops_watching(
+    hass: HomeAssistant, connection: FakeConnection, config_entry: MockConfigEntry
+) -> None:
+    """A setup that fails its first read leaves no subscription behind."""
+    connection.get_characteristics.side_effect = AccessoryDisconnectedError("gone")
+    assert not await _setup(hass, config_entry)
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
+    assert connection.subscriptions == {}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -27,6 +28,7 @@ from pytest_homeassistant_custom_component.common import (
 
 HKID = "AA:BB:CC:DD:EE:01"
 TITLE = "Outdoor Switch 1"
+ON_IID = (1, 11)
 POWER_IID = (1, 61)
 ENERGY_IID = (1, 62)
 
@@ -45,6 +47,13 @@ ACCESSORIES = [
                     {"iid": 5, "type": "00000030-0000-1000-8000-0026BB765291", "format": "string", "perms": ["pr"], "value": "00000000"},
                     {"iid": 6, "type": "00000014-0000-1000-8000-0026BB765291", "format": "bool", "perms": ["pw"]},
                     {"iid": 7, "type": "00000052-0000-1000-8000-0026BB765291", "format": "string", "perms": ["pr"], "value": "1.9.11"},
+                ],
+            },
+            {
+                "iid": 10,
+                "type": "00000049-0000-1000-8000-0026BB765291",
+                "characteristics": [
+                    {"iid": 11, "type": "00000025-0000-1000-8000-0026BB765291", "format": "bool", "perms": ["pr", "pw", "ev"], "value": True},
                 ],
             },
             {
@@ -87,6 +96,27 @@ class FakeConnection:
                 ENERGY_IID: {"value": 12345000000.0},
             }
         )
+        self.subscriptions: dict[tuple[int, int], set[Callable[[], None]]] = {}
+
+    def async_subscribe(
+        self, characteristics: set[tuple[int, int]], callback: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Follow pushed changes, as HKDevice.async_subscribe does."""
+        for aid_iid in characteristics:
+            self.subscriptions.setdefault(aid_iid, set()).add(callback)
+
+        def unsubscribe() -> None:
+            for aid_iid in characteristics:
+                self.subscriptions[aid_iid].remove(callback)
+                if not self.subscriptions[aid_iid]:
+                    del self.subscriptions[aid_iid]
+
+        return unsubscribe
+
+    def push(self, aid_iid: tuple[int, int]) -> None:
+        """Deliver a pushed change, as HKDevice.process_new_events does."""
+        for callback in set(self.subscriptions.get(aid_iid, ())):
+            callback()
 
 
 def add_paired_device(

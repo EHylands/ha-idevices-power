@@ -29,6 +29,7 @@ from .hkc import (
     async_get_pairing_entry,
     async_loaded_connections,
     metered_characteristics,
+    switch_characteristics,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,7 +69,9 @@ async def async_setup_entry(
         raise ConfigEntryNotReady(f"HomeKit device {entry.title} is not loaded yet")
 
     characteristics = {(aid, iid) for aid, _, iid in metered_characteristics(conn)}
-    coordinator = IDevicesPowerCoordinator(hass, entry, characteristics)
+    coordinator = IDevicesPowerCoordinator(
+        hass, entry, characteristics, switch_characteristics(conn)
+    )
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
 

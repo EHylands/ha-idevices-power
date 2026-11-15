@@ -6,6 +6,9 @@ CONF_HKID = "hkid"
 
 DEFAULT_SCAN_INTERVAL = 30  # seconds
 
+# Wait for the power reading to settle after the switch turns on or off.
+SWITCH_SETTLE_DELAY = 2  # seconds
+
 # Vendor power metering service exposed by iDevices switches and outlets.
 SERVICE_POWER = "6747C101-FAC9-4D62-ADF4-E764D0A8B39D"
 CHAR_POWER = "6747C102-FAC9-4D62-ADF4-E764D0A8B39D"  # milliwatts
