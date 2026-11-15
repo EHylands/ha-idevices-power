@@ -71,6 +71,12 @@ async def test_sensors(
     assert energy.attributes["unit_of_measurement"] == "kWh"
     assert energy.attributes["state_class"] == "total_increasing"
 
+    # Shown without decimals by default; the state keeps full precision.
+    entities = er.async_get(hass)
+    for entity_id in (POWER, ENERGY):
+        options = entities.async_get(entity_id).options["sensor"]
+        assert options["suggested_display_precision"] == 0
+
     devices = dr.async_get(hass)
     device = devices.async_get_device_by_identifier(
         device_identifier(HKID, 1), config_entry.entry_id
@@ -79,7 +85,6 @@ async def test_sensors(
     assert device.manufacturer == "iDevices LLC"
     assert device.model == "IDEV0004"
     assert device.sw_version == "1.9.11"
-    entities = er.async_get(hass)
     assert entities.async_get(POWER).device_id == device.id
     assert entities.async_get(ENERGY).device_id == device.id
 

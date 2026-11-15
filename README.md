@@ -35,6 +35,7 @@ Any HomeKit device that exposes the iDevices power service
 | Device | Model | Firmware | Status |
 | --- | --- | --- | --- |
 | iDevices Outdoor Switch | IDEV0004 | 1.9.11 | Tested |
+| iDevices Wall Outlet | IDEV0010 | 1.9.11 | Tested |
 
 Other iDevices switches and outlets with power metering will probably work too,
 but have not been tested. If you try one, please

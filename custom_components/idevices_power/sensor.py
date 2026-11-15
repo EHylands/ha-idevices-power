@@ -37,7 +37,7 @@ SENSORS: dict[str, IDevicesSensorEntityDescription] = {
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        suggested_display_precision=1,
+        suggested_display_precision=0,
         divisor=1000,  # mW -> W
     ),
     CHAR_ENERGY: IDevicesSensorEntityDescription(
@@ -45,7 +45,7 @@ SENSORS: dict[str, IDevicesSensorEntityDescription] = {
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        suggested_display_precision=3,
+        suggested_display_precision=0,
         divisor=3_600_000_000,  # mJ -> kWh
     ),
 }
