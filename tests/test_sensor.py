@@ -102,7 +102,7 @@ async def test_sensors_move_to_own_device(
         f"{HKID}_1_61",
         config_entry=config_entry,
         device_id=hkc_device.id,
-        suggested_object_id="outdoor_switch_00603739_power",
+        suggested_object_id="old_power_sensor",
     )
 
     assert await _setup(hass, config_entry)
