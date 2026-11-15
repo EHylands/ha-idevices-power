@@ -80,13 +80,6 @@ too, whatever its model name.
 for **iDevices HomeKit Power** and pick a switch from the list. Repeat for each
 switch.
 
-### Upgrading from 0.1.0
-
-Version 0.1.0 used a single entry for all switches. When you upgrade, that entry
-is removed and each switch appears as discovered. Add them again from
-**Discovered**. The sensors should come back with the same entity IDs, so
-history and the Energy dashboard carry on.
-
 ## Sensors
 
 Each switch gets two sensors. They are named after the switch, for example
