@@ -14,7 +14,13 @@ from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_HKID, DEFAULT_SCAN_INTERVAL, DOMAIN, SWITCH_SETTLE_DELAY
+from .const import (
+    CONF_HKID,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    SWITCH_READ_COUNT,
+    SWITCH_READ_INTERVAL,
+)
 from .hkc import async_get_connection
 
 if TYPE_CHECKING:
@@ -28,8 +34,8 @@ type IDevicesPowerConfigEntry = ConfigEntry[IDevicesPowerCoordinator]
 class IDevicesPowerCoordinator(DataUpdateCoordinator[dict[tuple[int, int], Any]]):
     """Reads one switch's power characteristics, which it never pushes.
 
-    Besides polling, power is read shortly after the switch turns on or off,
-    which it does push.
+    Besides polling, power is read a few times in quick succession after the
+    switch turns on or off, which it does push.
     """
 
     config_entry: IDevicesPowerConfigEntry
@@ -55,6 +61,7 @@ class IDevicesPowerCoordinator(DataUpdateCoordinator[dict[tuple[int, int], Any]]
         self._watched_conn: HKDevice | None = None
         self._unwatch: CALLBACK_TYPE | None = None
         self._cancel_switch_read: CALLBACK_TYPE | None = None
+        self._switch_reads_left = 0
 
     @callback
     def async_watch_switch(self, conn: HKDevice) -> None:
@@ -81,19 +88,34 @@ class IDevicesPowerCoordinator(DataUpdateCoordinator[dict[tuple[int, int], Any]]
 
     @callback
     def _async_switch_changed(self) -> None:
-        """Read power once it has settled after the switch changed."""
+        """Read power a few times as it settles after the switch changed.
+
+        A change during the reads starts them over.
+        """
+        self._switch_reads_left = SWITCH_READ_COUNT
+        self._async_schedule_switch_read()
+
+    @callback
+    def _async_schedule_switch_read(self) -> None:
         if self._cancel_switch_read is not None:
             self._cancel_switch_read()
         self._cancel_switch_read = async_call_later(
-            self.hass, SWITCH_SETTLE_DELAY, self._async_read_after_switch
+            self.hass, SWITCH_READ_INTERVAL, self._async_read_after_switch
         )
 
     async def _async_read_after_switch(self, _now: datetime) -> None:
         self._cancel_switch_read = None
-        await self.async_request_refresh()
+        self._switch_reads_left -= 1
+        # Not async_request_refresh: its cooldown would hold back reads this
+        # close together.
+        await self.async_refresh()
+        # Unless a change or shutdown came in during the read.
+        if self._switch_reads_left > 0 and self._cancel_switch_read is None:
+            self._async_schedule_switch_read()
 
     async def async_shutdown(self) -> None:
         """Stop following the switch."""
+        self._switch_reads_left = 0
         if self._cancel_switch_read is not None:
             self._cancel_switch_read()
             self._cancel_switch_read = None

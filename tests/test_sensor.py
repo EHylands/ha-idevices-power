@@ -16,7 +16,8 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from custom_components.idevices_power.const import (
     CONF_HKID,
     DOMAIN,
-    SWITCH_SETTLE_DELAY,
+    SWITCH_READ_COUNT,
+    SWITCH_READ_INTERVAL,
 )
 from custom_components.idevices_power.hkc import device_identifier
 
@@ -264,8 +265,10 @@ async def test_migrate_single_entry(
     assert [flow["context"]["unique_id"] for flow in flows] == [HKID.lower()]
 
 
-async def _settle(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
-    freezer.tick(timedelta(seconds=SWITCH_SETTLE_DELAY))
+async def _next_switch_read(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    freezer.tick(timedelta(seconds=SWITCH_READ_INTERVAL))
     async_fire_time_changed(hass)
     await hass.async_block_till_done(wait_background_tasks=True)
 
@@ -276,22 +279,46 @@ async def test_switch_change_reads_power(
     config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Power is read once it has settled after the switch pushes a change."""
+    """Power is read a few times, 2 seconds apart, after the switch changes."""
     assert await _setup(hass, config_entry)
     assert connection.get_characteristics.await_count == 1
 
-    connection.get_characteristics.return_value = {
-        POWER_IID: {"value": 0},
-        ENERGY_IID: {"value": 12345000000.0},
-    }
     connection.push(ON_IID)
-    connection.push(ON_IID)  # a quick off and on is read once
+    connection.push(ON_IID)  # a quick off and on is read as one change
     await hass.async_block_till_done()
     assert connection.get_characteristics.await_count == 1
 
-    await _settle(hass, freezer)
-    assert connection.get_characteristics.await_count == 2
-    assert float(hass.states.get(POWER).state) == 0.0
+    for read in range(1, SWITCH_READ_COUNT + 1):
+        connection.get_characteristics.return_value = {
+            POWER_IID: {"value": read * 1000},
+            ENERGY_IID: {"value": 12345000000.0},
+        }
+        await _next_switch_read(hass, freezer)
+        assert connection.get_characteristics.await_count == 1 + read
+        assert float(hass.states.get(POWER).state) == read
+
+    await _next_switch_read(hass, freezer)
+    assert connection.get_characteristics.await_count == 1 + SWITCH_READ_COUNT
+
+
+async def test_switch_change_restarts_reads(
+    hass: HomeAssistant,
+    connection: FakeConnection,
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A change while power is being read starts the reads over."""
+    assert await _setup(hass, config_entry)
+
+    connection.push(ON_IID)
+    await _next_switch_read(hass, freezer)
+    await _next_switch_read(hass, freezer)
+    assert connection.get_characteristics.await_count == 3
+
+    connection.push(ON_IID)
+    for _ in range(SWITCH_READ_COUNT + 1):
+        await _next_switch_read(hass, freezer)
+    assert connection.get_characteristics.await_count == 3 + SWITCH_READ_COUNT
 
 
 async def test_switch_watch_follows_reload(
@@ -310,7 +337,7 @@ async def test_switch_watch_follows_reload(
     assert set(new_connection.subscriptions) == {ON_IID}
 
     new_connection.push(ON_IID)
-    await _settle(hass, freezer)
+    await _next_switch_read(hass, freezer)
     assert new_connection.get_characteristics.await_count == 2
 
 
@@ -320,16 +347,20 @@ async def test_unload_stops_watching(
     config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Unloading drops the subscription and any pending read."""
+    """Unloading drops the subscription and the remaining reads."""
     assert await _setup(hass, config_entry)
     assert set(connection.subscriptions) == {ON_IID}
 
     connection.push(ON_IID)
+    await _next_switch_read(hass, freezer)
+    assert connection.get_characteristics.await_count == 2
+
     assert await hass.config_entries.async_unload(config_entry.entry_id)
-    await _settle(hass, freezer)
+    for _ in range(SWITCH_READ_COUNT):
+        await _next_switch_read(hass, freezer)
 
     assert connection.subscriptions == {}
-    assert connection.get_characteristics.await_count == 1
+    assert connection.get_characteristics.await_count == 2
 
 
 async def test_failed_setup_stops_watching(

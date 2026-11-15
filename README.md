@@ -113,9 +113,10 @@ The new interval applies immediately, without a restart.
 ### Updates when the switch turns on or off
 
 The switch only pushes its on/off state; power and energy can only be read. So
-whenever the switch turns on or off, power is read again 2 seconds later, once
-the reading has settled, instead of waiting for the next poll. Gradual changes
-while the switch stays on still follow the polling interval.
+whenever the switch turns on or off, power is read 5 times, 2 seconds apart,
+to follow the reading as it settles, instead of waiting for the next poll. If
+the switch changes again during those 10 seconds, the 5 reads start over.
+Gradual changes while the switch stays on still follow the polling interval.
 
 This relies on the HomeKit Device integration's switch entity for the switch.
 If you disable that entity, readings only follow the polling interval.
