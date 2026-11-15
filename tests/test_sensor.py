@@ -1,4 +1,4 @@
-"""Tests for the iDevices HomeKit Power sensors."""
+"""Tests for the iDevices HomeKit Power sensors and entry lifecycle."""
 
 from __future__ import annotations
 
@@ -8,11 +8,12 @@ from aiohomekit.exceptions import AccessoryDisconnectedError
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY, ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
+from custom_components.idevices_power.const import CONF_HKID, DOMAIN
 from custom_components.idevices_power.hkc import device_identifier
 
 from pytest_homeassistant_custom_component.common import (
@@ -25,6 +26,7 @@ from .conftest import (
     ENERGY_IID,
     HKID,
     POWER_IID,
+    TITLE,
     FakeConnection,
     add_paired_device,
 )
@@ -32,16 +34,12 @@ from .conftest import (
 POWER = "sensor.outdoor_switch_1_power"
 ENERGY = "sensor.outdoor_switch_1_energy"
 HKID_2 = "11:22:33:44:55:66"
-POWER_2 = "sensor.outdoor_switch_2_power"
-ENERGY_2 = "sensor.outdoor_switch_2_energy"
-
-# A HomeKit device without the iDevices power service.
-OTHER_ACCESSORIES = [{"aid": 1, "services": [ACCESSORIES[0]["services"][0]]}]
 
 
-async def _setup(hass: HomeAssistant, config_entry: MockConfigEntry) -> None:
-    assert await hass.config_entries.async_setup(config_entry.entry_id)
+async def _setup(hass: HomeAssistant, config_entry: MockConfigEntry) -> bool:
+    result = await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
+    return result
 
 
 async def _poll(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
@@ -55,7 +53,7 @@ async def test_sensors(
     hass: HomeAssistant, connection: FakeConnection, config_entry: MockConfigEntry
 ) -> None:
     """Readings are converted and attached to the HomeKit device."""
-    await _setup(hass, config_entry)
+    assert await _setup(hass, config_entry)
     assert config_entry.state is ConfigEntryState.LOADED
 
     power = hass.states.get(POWER)
@@ -79,47 +77,30 @@ async def test_sensors(
     connection.get_characteristics.assert_awaited_once_with({POWER_IID, ENERGY_IID})
 
 
-async def test_switch_paired_later(
+async def test_polling_and_errors(
     hass: HomeAssistant,
     connection: FakeConnection,
     config_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """A switch paired after setup gets sensors on the next poll."""
-    await _setup(hass, config_entry)
-    assert hass.states.get(POWER_2) is None
+    """Readings are polled, and go unavailable while the switch can't be read."""
+    assert await _setup(hass, config_entry)
 
-    second = add_paired_device(hass, HKID_2, "Outdoor Switch 2")
-    second.get_characteristics.return_value = {
-        POWER_IID: {"value": 7000},
-        ENERGY_IID: {"value": 3600000000.0},
+    connection.get_characteristics.return_value = {
+        POWER_IID: {"value": 1000},
+        ENERGY_IID: {"value": 12355000000.0},
     }
     await _poll(hass, freezer)
+    assert float(hass.states.get(POWER).state) == pytest.approx(1.0)
 
-    assert float(hass.states.get(POWER_2).state) == pytest.approx(7.0)
-    assert float(hass.states.get(ENERGY_2).state) == pytest.approx(1.0)
-    assert float(hass.states.get(POWER).state) == pytest.approx(452.3)
-
-
-async def test_one_switch_unreachable(
-    hass: HomeAssistant,
-    connection: FakeConnection,
-    config_entry: MockConfigEntry,
-    freezer: FrozenDateTimeFactory,
-) -> None:
-    """Only the switch that can't be read goes unavailable, until it is back."""
-    second = add_paired_device(hass, HKID_2, "Outdoor Switch 2")
-    await _setup(hass, config_entry)
-
-    second.get_characteristics.side_effect = AccessoryDisconnectedError("gone")
+    connection.get_characteristics.side_effect = AccessoryDisconnectedError("gone")
     await _poll(hass, freezer)
-    assert hass.states.get(POWER_2).state == STATE_UNAVAILABLE
-    assert hass.states.get(ENERGY_2).state == STATE_UNAVAILABLE
-    assert float(hass.states.get(POWER).state) == pytest.approx(452.3)
+    assert hass.states.get(POWER).state == STATE_UNAVAILABLE
+    assert hass.states.get(ENERGY).state == STATE_UNAVAILABLE
 
-    second.get_characteristics.side_effect = None
+    connection.get_characteristics.side_effect = None
     await _poll(hass, freezer)
-    assert float(hass.states.get(POWER_2).state) == pytest.approx(452.3)
+    assert float(hass.states.get(POWER).state) == pytest.approx(1.0)
 
 
 async def test_missing_value(
@@ -130,26 +111,27 @@ async def test_missing_value(
         POWER_IID: {"value": 5000},
         ENERGY_IID: {"status": -70402, "description": "Unable to communicate"},
     }
-    await _setup(hass, config_entry)
+    assert await _setup(hass, config_entry)
 
     assert float(hass.states.get(POWER).state) == pytest.approx(5.0)
     assert hass.states.get(ENERGY).state == STATE_UNAVAILABLE
 
 
-async def test_ignores_other_devices(
+async def test_homekit_not_loaded(
     hass: HomeAssistant, config_entry: MockConfigEntry
 ) -> None:
-    """Devices without the power service, or not connected, are left alone."""
-    other = add_paired_device(hass, HKID_2, "Light", OTHER_ACCESSORIES)
-    offline = add_paired_device(
-        hass, HKID, "Offline", state=ConfigEntryState.SETUP_RETRY
-    )
-    await _setup(hass, config_entry)
+    """Setup is retried until homekit_controller has connected."""
+    add_paired_device(hass, HKID, TITLE, state=ConfigEntryState.SETUP_RETRY)
+    assert not await _setup(hass, config_entry)
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
 
-    assert config_entry.state is ConfigEntryState.LOADED
-    assert hass.states.async_entity_ids("sensor") == []
-    other.get_characteristics.assert_not_awaited()
-    offline.get_characteristics.assert_not_awaited()
+
+async def test_pairing_missing(
+    hass: HomeAssistant, config_entry: MockConfigEntry
+) -> None:
+    """Setup fails without retrying when the switch is no longer paired."""
+    assert not await _setup(hass, config_entry)
+    assert config_entry.state is ConfigEntryState.SETUP_ERROR
 
 
 async def test_homekit_reloaded(
@@ -159,7 +141,7 @@ async def test_homekit_reloaded(
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """A new connection object is picked up after homekit_controller reloads."""
-    await _setup(hass, config_entry)
+    assert await _setup(hass, config_entry)
 
     new_connection = FakeConnection(connection.config_entry, HKID, ACCESSORIES)
     new_connection.get_characteristics.return_value = {
@@ -173,31 +155,57 @@ async def test_homekit_reloaded(
 
 
 async def test_switch_removed(
-    hass: HomeAssistant,
-    connection: FakeConnection,
-    config_entry: MockConfigEntry,
-    freezer: FrozenDateTimeFactory,
+    hass: HomeAssistant, connection: FakeConnection, config_entry: MockConfigEntry
 ) -> None:
-    """Sensors are deleted with the switch, and come back if it is re-paired."""
-    await _setup(hass, config_entry)
-    entities = er.async_get(hass)
-    devices = dr.async_get(hass)
-    device = devices.async_get_device_by_identifier(
-        device_identifier(HKID, 1), connection.config_entry.entry_id
+    """Deleting the switch from HomeKit Device deletes its entry and sensors."""
+    other = add_paired_device(hass, HKID_2, "Outdoor Switch 2")
+    other_entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        title="Outdoor Switch 2",
+        unique_id=HKID_2.lower(),
+        data={CONF_HKID: HKID_2},
     )
+    other_entry.add_to_hass(hass)
+    # Loading the integration sets up both entries.
+    assert await _setup(hass, config_entry)
+    assert other_entry.state is ConfigEntryState.LOADED
 
-    # Deleting the HomeKit entry unloads its connection and removes its device.
     await hass.config_entries.async_remove(connection.config_entry.entry_id)
     await hass.async_block_till_done()
-    assert devices.async_get(device.id) is None
-    assert entities.async_get(POWER) is None
-    assert entities.async_get(ENERGY) is None
+
+    assert hass.config_entries.async_get_entry(config_entry.entry_id) is None
+    assert er.async_get(hass).async_get(POWER) is None
     assert hass.states.get(POWER) is None
+    # The other switch is untouched.
+    assert other_entry.state is ConfigEntryState.LOADED
+    assert other.get_characteristics.await_count == 1
 
-    await _poll(hass, freezer)
-    assert entities.async_get(POWER) is None
 
-    add_paired_device(hass, HKID, "Outdoor Switch 1")
-    await _poll(hass, freezer)
-    assert float(hass.states.get(POWER).state) == pytest.approx(452.3)
-    assert entities.async_get(POWER).device_id is not None
+async def test_other_switches_offered(
+    hass: HomeAssistant, connection: FakeConnection, config_entry: MockConfigEntry
+) -> None:
+    """Once the integration is loaded, other paired switches are discovered."""
+    add_paired_device(hass, HKID_2, "Outdoor Switch 2")
+    assert await _setup(hass, config_entry)
+
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert len(flows) == 1
+    assert flows[0]["context"]["source"] == SOURCE_INTEGRATION_DISCOVERY
+    assert flows[0]["context"]["unique_id"] == HKID_2.lower()
+    assert flows[0]["step_id"] == "confirm"
+
+
+async def test_migrate_single_entry(
+    hass: HomeAssistant, connection: FakeConnection
+) -> None:
+    """The 0.1.0 entry for all switches is replaced by discovered switches."""
+    old_entry = MockConfigEntry(
+        domain=DOMAIN, version=1, title="iDevices HomeKit Power", data={}
+    )
+    old_entry.add_to_hass(hass)
+    await _setup(hass, old_entry)
+
+    assert hass.config_entries.async_get_entry(old_entry.entry_id) is None
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [flow["context"]["unique_id"] for flow in flows] == [HKID.lower()]

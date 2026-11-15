@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -12,14 +11,14 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import UnitOfEnergy, UnitOfPower
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CHAR_ENERGY, CHAR_POWER
-from .coordinator import IDevicesPowerConfigEntry, IDevicesPowerCoordinator, ReadingKey
-from .hkc import async_get_connection, async_get_device
+from .coordinator import IDevicesPowerConfigEntry, IDevicesPowerCoordinator
+from .hkc import async_get_connection, async_get_device, metered_characteristics
 
 PARALLEL_UPDATES = 0
 
@@ -57,31 +56,16 @@ async def async_setup_entry(
     entry: IDevicesPowerConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up sensors, adding more whenever a poll finds a new switch."""
+    """Set up the sensors."""
     coordinator = entry.runtime_data
-    known: set[ReadingKey] = set()
-
-    @callback
-    def _async_add_new_sensors() -> None:
-        new_sensors = []
-        for key in coordinator.metered.keys() - known:
-            hkid, aid, _ = key
-            conn = async_get_connection(hass, hkid)
-            sensor = IDevicesPowerSensor(
-                coordinator,
-                SENSORS[coordinator.metered[key]],
-                key,
-                async_get_device(hass, conn, aid) if conn else None,
-            )
-            # Let a removed sensor be found again if its switch comes back.
-            sensor.async_on_remove(partial(known.discard, key))
-            known.add(key)
-            new_sensors.append(sensor)
-        if new_sensors:
-            async_add_entities(new_sensors)
-
-    _async_add_new_sensors()
-    entry.async_on_unload(coordinator.async_add_listener(_async_add_new_sensors))
+    conn = async_get_connection(hass, coordinator.hkid)
+    assert conn is not None  # checked in async_setup_entry
+    async_add_entities(
+        IDevicesPowerSensor(
+            coordinator, SENSORS[char_type], aid, iid, async_get_device(hass, conn, aid)
+        )
+        for aid, char_type, iid in metered_characteristics(conn)
+    )
 
 
 class IDevicesPowerSensor(CoordinatorEntity[IDevicesPowerCoordinator], SensorEntity):
@@ -94,44 +78,24 @@ class IDevicesPowerSensor(CoordinatorEntity[IDevicesPowerCoordinator], SensorEnt
         self,
         coordinator: IDevicesPowerCoordinator,
         description: IDevicesSensorEntityDescription,
-        key: ReadingKey,
+        aid: int,
+        iid: int,
         device: dr.DeviceEntry | None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entity_description = description
-        self._key = key
-        hkid, aid, iid = key
-        self._attr_unique_id = f"{hkid}_{aid}_{iid}"
+        self._aid_iid = (aid, iid)
+        self._attr_unique_id = f"{coordinator.hkid}_{aid}_{iid}"
         # Show up on the device homekit_controller created, rather than a new one.
         self.device_entry = device
-        self._linked_device_id = device.id if device else None
-
-    @callback
-    def async_registry_entry_updated(self) -> None:
-        """Remove this sensor once homekit_controller deletes its device.
-
-        Home Assistant only unlinks another integration's entities from a
-        deleted device, leaving them behind.
-        """
-        assert self.registry_entry is not None
-        if self._linked_device_id is not None and self.registry_entry.device_id is None:
-            # Not while Home Assistant is still applying the update.
-            self.hass.loop.call_soon(self._async_remove_from_registry)
-
-    @callback
-    def _async_remove_from_registry(self) -> None:
-        """Delete this sensor's entity registry entry."""
-        entity_registry = er.async_get(self.hass)
-        if entity_registry.async_get(self.entity_id) is not None:
-            entity_registry.async_remove(self.entity_id)
 
     @property
     def available(self) -> bool:
         """Return True if the last poll returned a value for this sensor."""
-        return super().available and self._key in self.coordinator.data
+        return super().available and self._aid_iid in self.coordinator.data
 
     @property
     def native_value(self) -> float:
         """Return the reading in Home Assistant units."""
-        return self.coordinator.data[self._key] / self.entity_description.divisor
+        return self.coordinator.data[self._aid_iid] / self.entity_description.divisor

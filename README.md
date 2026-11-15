@@ -14,17 +14,17 @@ second time, and the built-in integration is left unmodified.
 
 ## Features
 
-- **Power** and **Energy** sensors for every paired iDevices switch, shown on
+- **Power** and **Energy** sensors for each paired iDevices switch, shown on
   the switch's existing device page.
+- **One entry per switch.** Each switch is added, configured and removed on its
+  own.
+- **Discovered automatically.** Paired switches that report power show up as
+  **Discovered** in Devices & services, ready to add.
 - **Energy dashboard ready.** The Energy sensor is a `total_increasing` kWh
   sensor.
-- **Automatic discovery.** Set it up once. Switches you pair later get sensors
-  within one polling interval, with no restart.
 - **Automatic cleanup.** Deleting a switch from the HomeKit Device integration
-  also deletes its sensors.
-- **Independent switches.** All switches are read in parallel. A switch that
-  can't be read only makes its own sensors unavailable.
-- **Configurable polling interval** (default 30 seconds).
+  also deletes its entry here.
+- **Configurable polling interval** per switch (default 30 seconds).
 
 ## Supported devices
 
@@ -65,12 +65,25 @@ whether it worked.
 
 ## Setup
 
-1. Go to **Settings → Devices & services → Add integration**.
-2. Search for **iDevices HomeKit Power**.
-3. The dialog lists the switches it found. Select **Submit** to add them all.
+Each switch is added separately.
 
-You only add the integration once. Switches paired afterwards are added
-automatically.
+**From discovery:** paired iDevices switches that report power appear under
+**Settings → Devices & services → Discovered** as *iDevices HomeKit Power*.
+Select **Add** on each one you want. Discovery comes from the network
+announcements of devices whose model starts with `IDEV`. Once one switch has
+been added, any other paired device with the iDevices power service is offered
+too, whatever its model name.
+
+**Manually:** go to **Settings → Devices & services → Add integration**, search
+for **iDevices HomeKit Power** and pick a switch from the list. Repeat for each
+switch.
+
+### Upgrading from 0.1.0
+
+Version 0.1.0 used a single entry for all switches. When you upgrade, that entry
+is removed and each switch appears as discovered. Add them again from
+**Discovered**. The sensors should come back with the same entity IDs, so
+history and the Energy dashboard carry on.
 
 ## Sensors
 
@@ -87,11 +100,11 @@ Individual devices**.
 
 ## Options
 
-Select **Configure** on the integration entry to change:
+Select **Configure** on a switch's entry to change:
 
 | Option | Default | Range | Description |
 | --- | --- | --- | --- |
-| Polling interval | 30 s | 5–3600 s | How often the switches are read. They never push power readings, so this sets how fresh the values are. |
+| Polling interval | 30 s | 5–3600 s | How often the switch is read. It never pushes power readings, so this sets how fresh the values are. |
 
 The new interval applies immediately, without a restart.
 
@@ -99,11 +112,11 @@ The new interval applies immediately, without a restart.
 
 1. The built-in HomeKit Device integration keeps a live, encrypted connection to
    each paired device, identified by its HomeKit pairing ID.
-2. On every poll, this integration goes through those connections and looks for
-   the iDevices power service in each device's accessory list. Devices without
-   it are skipped and are never contacted.
-3. For each device that has the service, it reads the power and energy
-   characteristics in a single request over the existing connection.
+2. Each entry stores one pairing ID. Discovery only offers a device if it is
+   paired with the HomeKit Device integration and has the iDevices power
+   service in its accessory list.
+3. On every poll, the entry finds that device's connection and reads the power
+   and energy characteristics in a single request over it.
 4. The sensors are attached to the device that the HomeKit Device integration
    created, so they appear alongside the switch's other entities.
 
@@ -114,6 +127,13 @@ The new interval applies immediately, without a restart.
 The switch is not paired with the HomeKit Device integration, or it is offline.
 Check that it appears under **Settings → Devices & services → HomeKit Device**
 and isn't showing an error, then try again.
+
+### A switch isn't discovered
+
+Discovery only offers devices that are paired with the HomeKit Device
+integration, connected, and reporting power. Wall Switches without power
+metering are skipped on purpose. If a switch that does report power is missing,
+add it manually with **Add integration**.
 
 ### Sensors are unavailable
 
@@ -139,8 +159,9 @@ logger:
 
 ## Removal
 
-1. Go to **Settings → Devices & services → iDevices HomeKit Power**, open the
-   **⋮** menu and select **Delete**. The switches themselves are not affected.
+1. Go to **Settings → Devices & services → iDevices HomeKit Power**. For each
+   switch, open its **⋮** menu and select **Delete**. The switches themselves
+   are not affected.
 2. Uninstall the integration from HACS, or delete
    `<config>/custom_components/idevices_power`, then restart.
 

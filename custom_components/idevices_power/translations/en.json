@@ -1,21 +1,34 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
-        "title": "iDevices HomeKit Power",
-        "description": "Power and energy sensors will be added to these HomeKit devices:\n\n{devices}\n\nSwitches paired later are added automatically."
+        "title": "Choose a switch",
+        "description": "Pick a switch that is paired with the HomeKit Device integration.",
+        "data": {
+          "hkid": "Switch"
+        }
+      },
+      "confirm": {
+        "title": "Add power sensors",
+        "description": "Add Power and Energy sensors to {name}?"
       }
     },
     "abort": {
-      "single_instance_allowed": "iDevices HomeKit Power is already set up. It covers all paired switches.",
-      "no_devices": "No paired HomeKit device with iDevices power metering was found. Pair the switch with the HomeKit Device integration first, and make sure it is online."
+      "already_configured": "Power sensors are already set up for this switch.",
+      "already_in_progress": "This switch is already being set up.",
+      "invalid_discovery_info": "The device did not advertise a HomeKit pairing ID.",
+      "no_devices": "No paired HomeKit device with iDevices power metering was found that isn't already set up. Pair the switch with the HomeKit Device integration first, and make sure it is online.",
+      "not_paired": "This device is not paired with the HomeKit Device integration. Pair it there first.",
+      "not_loaded": "The HomeKit Device integration is not connected to this device yet.",
+      "not_supported": "This device does not report power usage."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Polling",
-        "description": "The switches do not push power readings, so they are read on this interval.",
+        "description": "The switch does not push power readings, so it is read on this interval.",
         "data": {
           "scan_interval": "Polling interval"
         }

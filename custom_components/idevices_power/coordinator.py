@@ -2,91 +2,60 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import timedelta
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from aiohomekit.exceptions import HomeKitException
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
-from .hkc import async_loaded_connections, metered_characteristics
-
-if TYPE_CHECKING:
-    from homeassistant.components.homekit_controller.connection import HKDevice
+from .const import CONF_HKID, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .hkc import async_get_connection
 
 _LOGGER = logging.getLogger(__name__)
 
 type IDevicesPowerConfigEntry = ConfigEntry[IDevicesPowerCoordinator]
 
-# (pairing id, aid, iid) of one power or energy characteristic.
-type ReadingKey = tuple[str, int, int]
 
-
-class IDevicesPowerCoordinator(DataUpdateCoordinator[dict[ReadingKey, Any]]):
-    """Finds and reads every power characteristic, which devices never push."""
+class IDevicesPowerCoordinator(DataUpdateCoordinator[dict[tuple[int, int], Any]]):
+    """Reads one switch's power characteristics, which it never pushes."""
 
     config_entry: IDevicesPowerConfigEntry
 
-    def __init__(self, hass: HomeAssistant, entry: IDevicesPowerConfigEntry) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: IDevicesPowerConfigEntry,
+        characteristics: set[tuple[int, int]],
+    ) -> None:
         """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
-            name=DOMAIN,
+            name=f"{DOMAIN} {entry.title}",
             update_interval=scan_interval(entry),
         )
-        # Characteristic type of every reading found on the last poll.
-        self.metered: dict[ReadingKey, str] = {}
-        self._unreachable: set[str] = set()
+        self.hkid: str = entry.data[CONF_HKID]
+        self.characteristics = characteristics
 
-    async def _async_update_data(self) -> dict[ReadingKey, Any]:
-        """Read all devices that have the power service.
-
-        Connections are looked up on every poll, so switches paired or
-        reconnected since the last poll are picked up.
-        """
-        metered: dict[ReadingKey, str] = {}
-        reads = []
-        for conn in async_loaded_connections(self.hass):
-            if not (chars := metered_characteristics(conn)):
-                continue
-            for aid, char_type, iid in chars:
-                metered[(conn.unique_id, aid, iid)] = char_type
-            reads.append(self._async_read(conn, {(aid, iid) for aid, _, iid in chars}))
-        self.metered = metered
-
-        data: dict[ReadingKey, Any] = {}
-        for readings in await asyncio.gather(*reads):
-            data.update(readings)
-        return data
-
-    async def _async_read(
-        self, conn: HKDevice, characteristics: set[tuple[int, int]]
-    ) -> dict[ReadingKey, Any]:
-        """Read one device; a failure only makes its own sensors unavailable."""
-        hkid = conn.unique_id
+    async def _async_update_data(self) -> dict[tuple[int, int], Any]:
+        """Fetch the latest readings over homekit_controller's pairing."""
+        # Look the connection up every time: it is replaced if
+        # homekit_controller reloads its config entry.
+        if (conn := async_get_connection(self.hass, self.hkid)) is None:
+            raise UpdateFailed(f"HomeKit device {self.hkid} is not loaded")
         try:
-            results = await conn.get_characteristics(characteristics)
+            results = await conn.get_characteristics(self.characteristics)
         except (HomeKitException, TimeoutError) as err:
-            if hkid not in self._unreachable:
-                self._unreachable.add(hkid)
-                _LOGGER.info(
-                    "Can't read power from %s: %s", conn.config_entry.title, err
-                )
-            return {}
-        if hkid in self._unreachable:
-            self._unreachable.discard(hkid)
-            _LOGGER.info("Reading power from %s again", conn.config_entry.title)
+            raise UpdateFailed(f"Error reading {self.hkid}: {err}") from err
         return {
-            (hkid, aid, iid): result["value"]
-            for (aid, iid), result in results.items()
+            aid_iid: result["value"]
+            for aid_iid, result in results.items()
             if "value" in result
         }
 

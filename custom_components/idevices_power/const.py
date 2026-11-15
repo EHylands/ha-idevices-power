@@ -2,6 +2,8 @@
 
 DOMAIN = "idevices_power"
 
+CONF_HKID = "hkid"
+
 DEFAULT_SCAN_INTERVAL = 30  # seconds
 
 # Vendor power metering service exposed by iDevices switches and outlets.

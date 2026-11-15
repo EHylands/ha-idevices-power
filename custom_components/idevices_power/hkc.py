@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 
@@ -38,11 +38,23 @@ def async_loaded_connections(hass: HomeAssistant) -> list[HKDevice]:
 
 @callback
 def async_get_connection(hass: HomeAssistant, hkid: str) -> HKDevice | None:
-    """Return the homekit_controller connection for a pairing, if it is loaded."""
-    conn: HKDevice | None = hass.data.get(KNOWN_DEVICES, {}).get(hkid)
-    if conn is None or conn.config_entry.state is not ConfigEntryState.LOADED:
-        return None
-    return conn
+    """Return the connection for a pairing id, if it is set up.
+
+    The pairing id is matched in any letter case, as zeroconf and
+    homekit_controller do not agree on one.
+    """
+    for conn in async_loaded_connections(hass):
+        if conn.unique_id.lower() == hkid.lower():
+            return conn
+    return None
+
+
+@callback
+def async_get_pairing_entry(hass: HomeAssistant, hkid: str) -> ConfigEntry | None:
+    """Return homekit_controller's config entry for a pairing id, loaded or not."""
+    return hass.config_entries.async_entry_for_domain_unique_id(
+        HKC_DOMAIN, hkid.lower()
+    )
 
 
 def metered_characteristics(conn: HKDevice) -> list[tuple[int, str, int]]:

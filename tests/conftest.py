@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from custom_components.idevices_power.const import DOMAIN
+from custom_components.idevices_power.const import CONF_HKID, DOMAIN
 from custom_components.idevices_power.hkc import (
     HKC_DOMAIN,
     KNOWN_DEVICES,
@@ -58,6 +58,10 @@ ACCESSORIES = [
         ],
     }
 ]
+
+
+# A HomeKit device without the iDevices power service.
+OTHER_ACCESSORIES = [{"aid": 1, "services": [ACCESSORIES[0]["services"][0]]}]
 
 
 @pytest.fixture(autouse=True)
@@ -126,7 +130,13 @@ def connection(hass: HomeAssistant) -> FakeConnection:
 
 @pytest.fixture
 def config_entry(hass: HomeAssistant) -> MockConfigEntry:
-    """The iDevices HomeKit Power entry."""
-    entry = MockConfigEntry(domain=DOMAIN, title="iDevices HomeKit Power", data={})
+    """The iDevices HomeKit Power entry for the switch."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        title=TITLE,
+        unique_id=HKID.lower(),
+        data={CONF_HKID: HKID},
+    )
     entry.add_to_hass(hass)
     return entry
