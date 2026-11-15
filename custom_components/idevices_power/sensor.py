@@ -12,13 +12,13 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CHAR_ENERGY, CHAR_POWER
 from .coordinator import IDevicesPowerConfigEntry, IDevicesPowerCoordinator
-from .hkc import async_get_connection, async_get_device, metered_characteristics
+from .hkc import async_get_connection, device_info, metered_characteristics
 
 PARALLEL_UPDATES = 0
 
@@ -62,7 +62,7 @@ async def async_setup_entry(
     assert conn is not None  # checked in async_setup_entry
     async_add_entities(
         IDevicesPowerSensor(
-            coordinator, SENSORS[char_type], aid, iid, async_get_device(hass, conn, aid)
+            coordinator, SENSORS[char_type], aid, iid, device_info(conn, aid)
         )
         for aid, char_type, iid in metered_characteristics(conn)
     )
@@ -80,15 +80,14 @@ class IDevicesPowerSensor(CoordinatorEntity[IDevicesPowerCoordinator], SensorEnt
         description: IDevicesSensorEntityDescription,
         aid: int,
         iid: int,
-        device: dr.DeviceEntry | None,
+        device: DeviceInfo,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entity_description = description
         self._aid_iid = (aid, iid)
         self._attr_unique_id = f"{coordinator.hkid}_{aid}_{iid}"
-        # Show up on the device homekit_controller created, rather than a new one.
-        self.device_entry = device
+        self._attr_device_info = device
 
     @property
     def available(self) -> bool:

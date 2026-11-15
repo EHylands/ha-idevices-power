@@ -66,15 +66,55 @@ async def test_sensors(
     assert energy.attributes["unit_of_measurement"] == "kWh"
     assert energy.attributes["state_class"] == "total_increasing"
 
-    device = dr.async_get(hass).async_get_device_by_identifier(
-        device_identifier(HKID, 1), connection.config_entry.entry_id
+    devices = dr.async_get(hass)
+    device = devices.async_get_device_by_identifier(
+        device_identifier(HKID, 1), config_entry.entry_id
     )
+    assert device.name == TITLE
+    assert device.manufacturer == "iDevices LLC"
+    assert device.model == "IDEV0004"
+    assert device.sw_version == "1.9.11"
     entities = er.async_get(hass)
     assert entities.async_get(POWER).device_id == device.id
     assert entities.async_get(ENERGY).device_id == device.id
-    assert len(dr.async_get(hass).devices) == 1
+
+    # Linked to homekit_controller's device for the same switch.
+    linked = devices.async_get_devices(identifiers=device.identifiers)
+    assert {d.config_entry_id for d in linked} == {
+        config_entry.entry_id,
+        connection.config_entry.entry_id,
+    }
 
     connection.get_characteristics.assert_awaited_once_with({POWER_IID, ENERGY_IID})
+
+
+async def test_sensors_move_to_own_device(
+    hass: HomeAssistant, connection: FakeConnection, config_entry: MockConfigEntry
+) -> None:
+    """Sensors that 0.2.1 put on homekit_controller's device keep their IDs."""
+    hkc_device = dr.async_get(hass).async_get_device_by_identifier(
+        device_identifier(HKID, 1), connection.config_entry.entry_id
+    )
+    entities = er.async_get(hass)
+    old = entities.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{HKID}_1_61",
+        config_entry=config_entry,
+        device_id=hkc_device.id,
+        suggested_object_id="outdoor_switch_00603739_power",
+    )
+
+    assert await _setup(hass, config_entry)
+
+    moved = entities.async_get(old.entity_id)
+    assert moved.device_id != hkc_device.id
+    assert dr.async_get(hass).async_get(moved.device_id).config_entry_id == (
+        config_entry.entry_id
+    )
+    assert float(hass.states.get(old.entity_id).state) == pytest.approx(452.3)
+    # homekit_controller's device is untouched.
+    assert dr.async_get(hass).async_get(hkc_device.id) is not None
 
 
 async def test_polling_and_errors(
@@ -176,6 +216,9 @@ async def test_switch_removed(
 
     assert hass.config_entries.async_get_entry(config_entry.entry_id) is None
     assert er.async_get(hass).async_get(POWER) is None
+    assert not dr.async_get(hass).async_get_devices(
+        identifiers={device_identifier(HKID, 1)}
+    )
     assert hass.states.get(POWER) is None
     # The other switch is untouched.
     assert other_entry.state is ConfigEntryState.LOADED

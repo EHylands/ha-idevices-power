@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import CHAR_ENERGY, CHAR_POWER, SERVICE_POWER
 
@@ -74,11 +74,20 @@ def device_identifier(hkid: str, aid: int) -> tuple[str, str]:
     return (IDENTIFIER_ACCESSORY_ID, f"{hkid}:aid:{aid}")
 
 
-@callback
-def async_get_device(
-    hass: HomeAssistant, conn: HKDevice, aid: int
-) -> dr.DeviceEntry | None:
-    """Return the device homekit_controller registered for an accessory."""
-    return dr.async_get(hass).async_get_device_by_identifier(
-        device_identifier(conn.unique_id, aid), conn.config_entry.entry_id
+def device_info(conn: HKDevice, aid: int) -> DeviceInfo:
+    """Describe an accessory as homekit_controller does.
+
+    Sharing homekit_controller's identifier makes Home Assistant show this
+    integration's device as linked to homekit_controller's: the same physical
+    switch, provided by both integrations.
+    """
+    accessory = conn.entity_map.aid(aid)
+    return DeviceInfo(
+        identifiers={device_identifier(conn.unique_id, aid)},
+        name=accessory.name,
+        manufacturer=accessory.manufacturer,
+        model=accessory.model,
+        serial_number=accessory.serial_number,
+        sw_version=accessory.firmware_revision,
+        hw_version=accessory.hardware_revision,
     )

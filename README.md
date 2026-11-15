@@ -14,8 +14,9 @@ second time, and the built-in integration is left unmodified.
 
 ## Features
 
-- **Power** and **Energy** sensors for each paired iDevices switch, shown on
-  the switch's existing device page.
+- **Power** and **Energy** sensors for each paired iDevices switch, on a device
+  of their own that Home Assistant shows as linked to the switch's HomeKit
+  device.
 - **One entry per switch.** Each switch is added, configured and removed on its
   own.
 - **Discovered automatically.** Paired switches that report power show up as
@@ -117,8 +118,9 @@ The new interval applies immediately, without a restart.
    service in its accessory list.
 3. On every poll, the entry finds that device's connection and reads the power
    and energy characteristics in a single request over it.
-4. The sensors are attached to the device that the HomeKit Device integration
-   created, so they appear alongside the switch's other entities.
+4. Each entry registers a device for its switch with the same identifier the
+   HomeKit Device integration uses. Home Assistant treats the two as one
+   physical switch provided by both integrations, and shows them as linked.
 
 ## Troubleshooting
 
