@@ -1,0 +1,25 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "iDevices HomeKit Power",
+        "description": "Power and energy sensors will be added to these HomeKit devices:\n\n{devices}\n\nSwitches paired later are added automatically."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "iDevices HomeKit Power is already set up. It covers all paired switches.",
+      "no_devices": "No paired HomeKit device with iDevices power metering was found. Pair the switch with the HomeKit Device integration first, and make sure it is online."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polling",
+        "description": "The switches do not push power readings, so they are read on this interval.",
+        "data": {
+          "scan_interval": "Polling interval"
+        }
+      }
+    }
+  }
+}
